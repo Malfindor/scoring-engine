@@ -3,9 +3,6 @@
   "timeout_seconds": 6,
   "dns_query_name": "example.com",
   "services": [
-    // -------------------------
-    // Team 1  (172.25.21.0/24)
-    // -------------------------
 
     { "id": "t1-debian-dns", "team": "Blue Team 1", "type": "DNS",
       "host": "172.25.21.20", "port": 53, "query_name": "example.com", "weight": 15 },
@@ -28,10 +25,6 @@
     { "id": "t1-fedora-smtp", "team": "Blue Team 1", "type": "SMTP",
       "host": "172.25.21.39", "port": 25, "ssl_only": false, "use_tls": false,
       "username": "employee1", "password": "changeme1", "weight": 15 },
-
-    // -------------------------
-    // Team 2  (172.25.22.0/24)
-    // -------------------------
 
     { "id": "t2-debian-dns", "team": "Blue Team 2", "type": "DNS",
       "host": "172.25.22.20", "port": 53, "query_name": "example.com", "weight": 15 },
