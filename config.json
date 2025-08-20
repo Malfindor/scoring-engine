@@ -1,0 +1,58 @@
+{
+  "interval_seconds": 60,
+  "timeout_seconds": 6,
+  "dns_query_name": "example.com",
+  "services": [
+    // -------------------------
+    // Team 1  (172.25.21.0/24)
+    // -------------------------
+
+    { "id": "t1-debian-dns", "team": "Blue Team 1", "type": "DNS",
+      "host": "172.25.21.20", "port": 53, "query_name": "example.com", "weight": 15 },
+
+    { "id": "t1-2012ad-dns", "team": "Blue Team 1", "type": "DNS",
+      "host": "172.25.21.27", "port": 53, "query_name": "example.com", "weight": 15 },
+
+    { "id": "t1-splunk-https", "team": "Blue Team 1", "type": "HTTPS",
+      "host": "172.25.21.9", "port": 8000, "path": "/", "verify_cert": false,
+      "host_header": "splunk.team1.local", "sni": "splunk.team1.local", "weight": 20 },
+
+    { "id": "t1-centos-ecom-https", "team": "Blue Team 1", "type": "HTTPS",
+      "host": "172.25.21.11", "port": 443, "path": "/", "verify_cert": false,
+      "host_header": "ecom.team1.local", "sni": "ecom.team1.local", "weight": 20 },
+
+    { "id": "t1-fedora-pop3", "team": "Blue Team 1", "type": "POP3",
+      "host": "172.25.21.39", "port": 110, "pop_ssl": false,
+      "pop_user": "employee1", "pop_pass": "changeme1", "weight": 10 },
+
+    { "id": "t1-fedora-smtp", "team": "Blue Team 1", "type": "SMTP",
+      "host": "172.25.21.39", "port": 25, "ssl_only": false, "use_tls": false,
+      "username": "employee1", "password": "changeme1", "weight": 15 },
+
+    // -------------------------
+    // Team 2  (172.25.22.0/24)
+    // -------------------------
+
+    { "id": "t2-debian-dns", "team": "Blue Team 2", "type": "DNS",
+      "host": "172.25.22.20", "port": 53, "query_name": "example.com", "weight": 15 },
+
+    { "id": "t2-2012ad-dns", "team": "Blue Team 2", "type": "DNS",
+      "host": "172.25.22.27", "port": 53, "query_name": "example.com", "weight": 15 },
+
+    { "id": "t2-splunk-https", "team": "Blue Team 2", "type": "HTTPS",
+      "host": "172.25.22.9", "port": 8000, "path": "/", "verify_cert": false,
+      "host_header": "splunk.team2.local", "sni": "splunk.team2.local", "weight": 20 },
+
+    { "id": "t2-centos-ecom-https", "team": "Blue Team 2", "type": "HTTPS",
+      "host": "172.25.22.11", "port": 443, "path": "/", "verify_cert": false,
+      "host_header": "ecom.team2.local", "sni": "ecom.team2.local", "weight": 20 },
+
+    { "id": "t2-fedora-pop3", "team": "Blue Team 2", "type": "POP3",
+      "host": "172.25.22.39", "port": 110, "pop_ssl": false,
+      "pop_user": "employee2", "pop_pass": "changeme2", "weight": 10 },
+
+    { "id": "t2-fedora-smtp", "team": "Blue Team 2", "type": "SMTP",
+      "host": "172.25.22.39", "port": 25, "ssl_only": false, "use_tls": false,
+      "username": "employee2", "password": "changeme2", "weight": 15 }
+  ]
+}
