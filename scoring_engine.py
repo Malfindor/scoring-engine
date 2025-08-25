@@ -212,49 +212,86 @@ def dns_query_a(server: str, port: int, qname: str, timeout: float) -> Tuple[boo
 # Each checker returns: (ok: bool, message: str, latency_ms: Optional[int], fingerprint: Optional[str])
 
 def check_https(svc: Service) -> Tuple[bool, str, Optional[int], Optional[str]]:
+    # Prepare TLS context
     ctx = ssl.create_default_context()
-    server_hostname = svc.sni or svc.host
     if not svc.verify_cert:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+
+    host_for_sni = svc.sni or svc.host
+    host_header = svc.host_header or host_for_sni
+    path = svc.path or "/"
+
     start = time.perf_counter()
-    conn = None
     try:
-        conn = http.client.HTTPSConnection(
-            host=svc.host, port=svc.port, timeout=svc.timeout, context=ctx
-        )
-        # custom SNI path
-        if svc.sni and svc.sni != svc.host:
-            with socket.create_connection((svc.host, svc.port), timeout=svc.timeout) as raw:
-                with ctx.wrap_socket(raw, server_hostname=server_hostname) as ssock:
-                    conn.sock = ssock
-                    conn._buffer = b""
-                    conn._is_https = True
-        headers = {}
-        if svc.host_header:
-            headers["Host"] = svc.host_header
-        conn.request("GET", svc.path or "/", headers=headers)
-        resp = conn.getresponse()
-        body = resp.read(64 * 1024)  # hash first 64KB
-        rtt = ms_since(start)
-        ok = 200 <= resp.status < 400
-        ctype = resp.getheader("Content-Type") or ""
-        fp = f"status={resp.status}|ctype={ctype}|b64k={sha256_hex(body)}"
-        if ok:
-            return True, f"HTTP {resp.status} OK ({rtt} ms)", rtt, fp
-        else:
-            return False, f"HTTP {resp.status} {resp.reason}", rtt, fp
+        # TCP connect
+        with socket.create_connection((svc.host, svc.port), timeout=svc.timeout) as raw:
+            # TLS wrap with SNI
+            with ctx.wrap_socket(raw, server_hostname=host_for_sni) as ssock:
+                ssock.settimeout(svc.timeout)
+
+                # Minimal HTTP/1.1 GET
+                req = (
+                    f"GET {path} HTTP/1.1\r\n"
+                    f"Host: {host_header}\r\n"
+                    f"User-Agent: ccdc-scorer/1.0\r\n"
+                    f"Connection: close\r\n"
+                    f"\r\n"
+                ).encode("ascii", "strict")
+                ssock.sendall(req)
+
+                # Read up to 64KB for fingerprinting
+                chunks = []
+                total = 0
+                max_bytes = 64 * 1024
+                while total < max_bytes:
+                    try:
+                        data = ssock.recv(min(4096, max_bytes - total))
+                    except socket.timeout:
+                        break
+                    if not data:
+                        break
+                    chunks.append(data)
+                    total += len(data)
+                blob = b"".join(chunks)
     except ssl.SSLError as e:
         return False, f"TLS error: {e}", None, None
     except (ConnectionRefusedError, TimeoutError, socket.timeout) as e:
         return False, f"Connect timeout/refused: {e}", None, None
     except Exception as e:
         return False, f"HTTPS error: {e}", None, None
-    finally:
-        with contextlib.suppress(Exception):
-            if conn:
-                conn.close()
 
+    rtt = ms_since(start)
+
+    # Parse status line + a couple headers (very loose parsing)
+    # Expect: HTTP/1.1 200 OK\r\nHeader:...\r\n\r\nBody
+    try:
+        header_end = blob.find(b"\r\n\r\n")
+        header_block = blob[:header_end if header_end != -1 else len(blob)]
+        lines = header_block.split(b"\r\n")
+        status_line = lines[0].decode("iso-8859-1", "replace") if lines else "HTTP/1.1 000"
+        parts = status_line.split()
+        status = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else 0
+
+        ctype = ""
+        for ln in lines[1:]:
+            if ln.lower().startswith(b"content-type:"):
+                ctype = ln.split(b":", 1)[1].strip().decode("iso-8859-1", "replace")
+                break
+
+        body = blob[header_end+4:] if header_end != -1 else b""
+        fp = f"status={status}|ctype={ctype}|b64k={sha256_hex(body[:65536])}"
+        ok = (200 <= status < 400)
+        if ok:
+            return True, f"HTTP {status} OK ({rtt} ms)", rtt, fp
+        else:
+            # include reason phrase if present
+            reason = " ".join(parts[2:]) if len(parts) >= 3 else ""
+            return False, f"HTTP {status} {reason}".strip(), rtt, fp
+    except Exception as e:
+        # If parsing fails, at least return the raw fingerprint of what we got
+        fp = f"raw={sha256_hex(blob)}"
+        return False, f"HTTPS parse error: {e}", rtt, fp
 
 def check_dns(svc: Service) -> Tuple[bool, str, Optional[int], Optional[str]]:
     ok, msg, arecs = dns_query_a(svc.host, svc.port, svc.query_name, svc.timeout)

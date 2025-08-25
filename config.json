@@ -5,8 +5,8 @@
   "services": [
     { "id": "t1-debian-dns",       "team": "Blue Team 1", "type": "DNS",   "host": "172.25.21.20", "port": 53,   "query_name": "ecom.allsafe.com", "weight": 15 },
     { "id": "t1-2012ad-dns",       "team": "Blue Team 1", "type": "DNS",   "host": "172.25.21.27", "port": 53,   "query_name": "ecom.allsafe.com", "weight": 15 },
-    { "id": "t1-splunk-https",     "team": "Blue Team 1", "type": "HTTPS", "host": "172.25.21.9",  "port": 8000, "path": "/", "verify_cert": false, "host_header": "splunk.team1.local", "sni": "splunk.team1.local", "weight": 20 },
-    { "id": "t1-centos-ecom-https","team": "Blue Team 1", "type": "HTTPS", "host": "172.25.21.11", "port": 443,  "path": "/", "verify_cert": false, "host_header": "ecom.team1.local",   "sni": "ecom.team1.local",   "weight": 20 },
+    { "id": "t1-splunk-https",     "team": "Blue Team 1", "type": "HTTPS", "host": "172.25.21.9",  "port": 8000, "path": "/en-US/account/login", "verify_cert": false, "host_header": "splunk.allsafe.com", "sni": "splunk.allsafe.com", "weight": 20 },
+    { "id": "t1-centos-ecom-https","team": "Blue Team 1", "type": "HTTPS", "host": "172.25.21.11", "port": 443,  "path": "/prestashop/index.php", "verify_cert": false, "host_header": "ecom.allsafe.com",   "sni": "ecom.allsafe.com",   "weight": 20 },
     { "id": "t1-fedora-pop3",      "team": "Blue Team 1", "type": "POP3",  "host": "172.25.21.39", "port": 110,  "pop_ssl": false, "pop_user": "employee1", "pop_pass": "changeme1", "weight": 10 },
     { "id": "t1-fedora-smtp",      "team": "Blue Team 1", "type": "SMTP",  "host": "172.25.21.39", "port": 25,   "ssl_only": false, "use_tls": false, "username": "employee1", "password": "changeme1", "weight": 15 },
 
