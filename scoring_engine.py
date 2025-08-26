@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-CCDC All‑in‑One Scoring Engine + Web UI (with Baseline Accuracy)
+CCDC All-in-One Scoring Engine + Web UI (Baseline + Cookie-safe HTTPS)
 
-- On startup, performs a baseline snapshot for each service and saves to baseline.json
-- Each round compares current fingerprints to baseline; points are awarded only if:
-    * the service is UP, and
-    * the fingerprint matches baseline (accuracy)
-- Web UI shows Leaderboard, Service Status (with Accuracy), and Last Rounds
-- Stdlib only
+- Baseline: first successful fingerprints saved into baseline.json (in --outdir)
+- Accuracy: subsequent rounds must match baseline to earn points
+- HTTPS fingerprinting:
+    * Reliable low-level TLS + HTTP/1.1 client (works with SNI/Host-on-IP)
+    * Optional cookie/token scrubbing for dynamic pages
+    * Modes: full | status_ctype | status_only
+- Services: HTTPS, DNS, SMTP, POP3
+- Web UI: Leaderboard, Service Status (with Accuracy), Last Rounds
 
 Run:
   python ccdc_all_in_one.py --config ccdc_config.json --outdir out --interval 60 \
@@ -27,11 +29,11 @@ import json
 import os
 import poplib
 import random
+import re
 import smtplib
 import socket
 import ssl
 import struct
-import sys
 import threading
 import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -55,6 +57,12 @@ class Service:
     verify_cert: bool = True
     host_header: Optional[str] = None
     sni: Optional[str] = None
+
+    # HTTPS fingerprinting options
+    fingerprint_mode: str = "full"      # "full" | "status_ctype" | "status_only"
+    body_regex: Optional[str] = None    # optional regex to extract stable parts
+    ignore_cookies: bool = False        # scrub cookies/tokens from body before hashing
+    cookie_body_patterns: Optional[List[str]] = None  # optional custom regex list
 
     # DNS options
     query_name: str = "example.com"
@@ -81,7 +89,7 @@ class ServiceResult:
     host: str
     port: int
     passed: bool
-    accurate: Optional[bool]  # None if no baseline, else True/False
+    accurate: Optional[bool]  # None if no baseline exists for this service
     points: int
     message: str
     latency_ms: Optional[int]
@@ -108,6 +116,58 @@ def csv_escape(s: Any) -> str:
 
 def sha256_hex(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
+
+
+# ===========================
+# Cookie scrubbing & HTTP fingerprint helper
+# ===========================
+
+DEFAULT_COOKIE_BODY_PATTERNS = [
+    r"splunkweb_csrf_token\s*=\s*['\"][^'\"]+['\"]",
+    r"csrf[_-]?token\s*[:=]\s*['\"][^'\"]+['\"]",
+    r"document\.cookie\s*=\s*['\"][^'\"]+['\"]",
+    r"\b(JSESSIONID|sessionid|sessid|_session_id)\s*=\s*[^;\"'\s]+",
+    r"Set-Cookie:[^\r\n]+",  # in case headers get mirrored into body
+]
+
+def scrub_cookies_from_body(body: bytes, svc: Service) -> bytes:
+    """Remove cookie/token substrings from body bytes before hashing."""
+    try:
+        text = body.decode("utf-8", "ignore")
+    except Exception:
+        return body
+    patterns = svc.cookie_body_patterns or DEFAULT_COOKIE_BODY_PATTERNS
+    for pat in patterns:
+        text = re.sub(pat, "COOKIE_REDACTED", text, flags=re.I | re.S)
+    return text.encode("utf-8", "ignore")
+
+
+def fingerprint_http(svc: Service, status: int, content_type: str, body: bytes) -> str:
+    """
+    Build a stable fingerprint for HTTP/HTTPS responses with optional cookie scrubbing
+    and relaxed modes to avoid mismatches on dynamic pages.
+    """
+    mode = (svc.fingerprint_mode or "full").lower()
+    if mode == "status_only":
+        return f"status={status}"
+    if mode == "status_ctype":
+        return f"status={status}|ctype={content_type or ''}"
+
+    # full mode -> may scrub cookies and/or extract stable part
+    if svc.ignore_cookies:
+        body = scrub_cookies_from_body(body, svc)
+
+    if svc.body_regex:
+        try:
+            text = body.decode("utf-8", "ignore")
+            matches = re.findall(svc.body_regex, text, flags=re.S | re.I)
+            selected = "|".join(matches) if matches else ""
+            return f"status={status}|ctype={content_type or ''}|sel={sha256_hex(selected.encode('utf-8'))}"
+        except Exception:
+            # fall through to plain body hashing
+            pass
+
+    return f"status={status}|ctype={content_type or ''}|b64k={sha256_hex(body[:65536])}"
 
 
 # ===========================
@@ -212,14 +272,21 @@ def dns_query_a(server: str, port: int, qname: str, timeout: float) -> Tuple[boo
 # Each checker returns: (ok: bool, message: str, latency_ms: Optional[int], fingerprint: Optional[str])
 
 def check_https(svc: Service) -> Tuple[bool, str, Optional[int], Optional[str]]:
-    # Prepare TLS context
+    """
+    Low-level TLS + HTTP/1.1 client:
+    - Connects to svc.host:svc.port
+    - Sends SNI = svc.sni or svc.host
+    - Uses Host header = svc.host_header or SNI host
+    - Reads up to 64KB to build a fingerprint
+    """
+    # TLS context
     ctx = ssl.create_default_context()
     if not svc.verify_cert:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
 
-    host_for_sni = svc.sni or svc.host
-    host_header = svc.host_header or host_for_sni
+    sni_host = svc.sni or svc.host
+    host_header = svc.host_header or sni_host
     path = svc.path or "/"
 
     start = time.perf_counter()
@@ -227,7 +294,7 @@ def check_https(svc: Service) -> Tuple[bool, str, Optional[int], Optional[str]]:
         # TCP connect
         with socket.create_connection((svc.host, svc.port), timeout=svc.timeout) as raw:
             # TLS wrap with SNI
-            with ctx.wrap_socket(raw, server_hostname=host_for_sni) as ssock:
+            with ctx.wrap_socket(raw, server_hostname=sni_host) as ssock:
                 ssock.settimeout(svc.timeout)
 
                 # Minimal HTTP/1.1 GET
@@ -240,8 +307,8 @@ def check_https(svc: Service) -> Tuple[bool, str, Optional[int], Optional[str]]:
                 ).encode("ascii", "strict")
                 ssock.sendall(req)
 
-                # Read up to 64KB for fingerprinting
-                chunks = []
+                # Read up to 64KB
+                chunks: List[bytes] = []
                 total = 0
                 max_bytes = 64 * 1024
                 while total < max_bytes:
@@ -263,8 +330,7 @@ def check_https(svc: Service) -> Tuple[bool, str, Optional[int], Optional[str]]:
 
     rtt = ms_since(start)
 
-    # Parse status line + a couple headers (very loose parsing)
-    # Expect: HTTP/1.1 200 OK\r\nHeader:...\r\n\r\nBody
+    # Parse status line + Content-Type (loose)
     try:
         header_end = blob.find(b"\r\n\r\n")
         header_block = blob[:header_end if header_end != -1 else len(blob)]
@@ -280,18 +346,17 @@ def check_https(svc: Service) -> Tuple[bool, str, Optional[int], Optional[str]]:
                 break
 
         body = blob[header_end+4:] if header_end != -1 else b""
-        fp = f"status={status}|ctype={ctype}|b64k={sha256_hex(body[:65536])}"
+        fp = fingerprint_http(svc, status, ctype, body)
         ok = (200 <= status < 400)
         if ok:
             return True, f"HTTP {status} OK ({rtt} ms)", rtt, fp
         else:
-            # include reason phrase if present
             reason = " ".join(parts[2:]) if len(parts) >= 3 else ""
             return False, f"HTTP {status} {reason}".strip(), rtt, fp
     except Exception as e:
-        # If parsing fails, at least return the raw fingerprint of what we got
         fp = f"raw={sha256_hex(blob)}"
         return False, f"HTTPS parse error: {e}", rtt, fp
+
 
 def check_dns(svc: Service) -> Tuple[bool, str, Optional[int], Optional[str]]:
     ok, msg, arecs = dns_query_a(svc.host, svc.port, svc.query_name, svc.timeout)
@@ -407,18 +472,33 @@ def parse_services(cfg: Dict[str, Any]) -> List[Service]:
             host=raw["host"],
             port=int(raw.get("port", default_port_for(raw["type"]))),
             weight=int(raw.get("weight", 10)),
+
+            # HTTPS options
             path=raw.get("path", "/"),
             verify_cert=bool(raw.get("verify_cert", True)),
             host_header=raw.get("host_header"),
             sni=raw.get("sni"),
+
+            # HTTPS fingerprint options
+            fingerprint_mode=raw.get("fingerprint_mode", "full"),
+            body_regex=raw.get("body_regex"),
+            ignore_cookies=bool(raw.get("ignore_cookies", False)),
+            cookie_body_patterns=raw.get("cookie_body_patterns"),
+
+            # DNS
             query_name=raw.get("query_name", cfg.get("dns_query_name", "example.com")),
+
+            # SMTP
             ssl_only=bool(raw.get("ssl_only", False)),
             use_tls=bool(raw.get("use_tls", False)),
             username=raw.get("username"),
             password=raw.get("password"),
+
+            # POP3
             pop_ssl=bool(raw.get("pop_ssl", raw.get("ssl_only", False))),
             pop_user=raw.get("pop_user", raw.get("username")),
             pop_pass=raw.get("pop_pass", raw.get("password")),
+
             timeout=float(raw.get("timeout", cfg.get("timeout_seconds", 6.0))),
         )
         services.append(svc)
@@ -492,7 +572,7 @@ def summarize_results(results: List[ServiceResult]) -> Dict[str, Any]:
 
 
 # ===========================
-# In‑memory scoreboard state
+# In-memory scoreboard state
 # ===========================
 
 STATE_LOCK = threading.Lock()
@@ -880,7 +960,7 @@ def start_server(host: str, port: int, outdir: str):
 # ===========================
 
 def main():
-    ap = argparse.ArgumentParser(description="CCDC All‑in‑One Scoring Engine + Web UI (Baseline Accuracy)")
+    ap = argparse.ArgumentParser(description="CCDC All-in-One Scoring Engine + Web UI (Baseline Accuracy)")
     ap.add_argument("--config", required=True, help="Path to config JSON")
     ap.add_argument("--outdir", default=".", help="Directory for outputs")
     ap.add_argument("--interval", type=int, default=None, help="Seconds between rounds (overrides config)")
