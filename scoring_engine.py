@@ -78,6 +78,12 @@ class Service:
     pop_user: Optional[str] = None
     pop_pass: Optional[str] = None
 
+    # FTP options
+    ftp_mode: str = "plain"          # "plain" | "explicit_tls" | "implicit_tls"
+    ftp_user: Optional[str] = None   # optional login (otherwise banner-only)
+    ftp_pass: Optional[str] = None
+    ftp_passive: bool = True         # only matters if you later add data cmds
+
     timeout: float = 6.0
 
 
@@ -436,12 +442,132 @@ def check_pop3(svc: Service) -> Tuple[bool, str, Optional[int], Optional[str]]:
             if pop:
                 pop.quit()
 
+def _recv_text(sock: socket.socket, max_bytes: int = 4096, timeout: float = 6.0) -> bytes:
+    sock.settimeout(timeout)
+    chunks, total = [], 0
+    while total < max_bytes:
+        try:
+            b = sock.recv(min(1024, max_bytes - total))
+        except socket.timeout:
+            break
+        if not b:
+            break
+        chunks.append(b)
+        total += len(b)
+        # stop once we’ve seen at least one line ending
+        if b.find(b"\n") != -1 and total >= 2:
+            # brief extra read to catch the rest of the greeting/response
+            with contextlib.suppress(Exception):
+                sock.settimeout(0.2)
+                more = sock.recv(1024)
+                if more: chunks.append(more)
+            break
+    return b"".join(chunks)
+
+def _send_cmd(sock: socket.socket, cmd: str) -> bytes:
+    sock.sendall((cmd + "\r\n").encode("ascii", "strict"))
+    return _recv_text(sock)
+
+def check_ftp(svc: Service) -> Tuple[bool, str, Optional[int], Optional[str]]:
+    """
+    FTP availability over control channel only.
+    Modes:
+      - plain          : TCP 21 cleartext
+      - explicit_tls   : TCP 21, AUTH TLS upgrades control channel
+      - implicit_tls   : TCP 990 TLS from start (set port=990)
+    Fingerprint = sha256(banner) + sha256(FEAT) + current PWD (if any)
+    """
+    start = time.perf_counter()
+
+    # TCP connect
+    try:
+        raw = socket.create_connection((svc.host, svc.port), timeout=svc.timeout)
+    except Exception as e:
+        return False, f"FTP connect failed: {e}", None, None
+
+    ctx = None
+    sock = raw
+    try:
+        # Greeting (or TLS first if implicit)
+        if svc.ftp_mode.lower() == "implicit_tls":
+            ctx = ssl.create_default_context()
+            # FTP servers often have self-signed certs in lab; allow skipping verify via verify_cert flag.
+            if not svc.verify_cert:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            sock = ctx.wrap_socket(raw, server_hostname=svc.host)
+            banner = _recv_text(sock, timeout=svc.timeout)
+        else:
+            banner = _recv_text(sock, timeout=svc.timeout)
+
+        # Explicit TLS (AUTH TLS) path
+        if svc.ftp_mode.lower() == "explicit_tls":
+            ctx = ssl.create_default_context()
+            if not svc.verify_cert:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            resp = _send_cmd(sock, "AUTH TLS")
+            # 234 = ready to start TLS; 534 = not supported
+            if not resp.startswith(b"234"):
+                return False, f"FTP AUTH TLS failed: {resp.decode('iso-8859-1','replace').strip()}", None, None
+            sock = ctx.wrap_socket(sock, server_hostname=svc.host)
+
+        # Now we’re on the final control channel; ask for FEAT (optional)
+        feat = _send_cmd(sock, "FEAT")
+        # Try to login only if creds provided (many FTPs allow anon; if you want anon, set ftp_user='anonymous', ftp_pass='test@')
+        pwd_line = b""
+        if svc.ftp_user and svc.ftp_pass:
+            u = _send_cmd(sock, f"USER {svc.ftp_user}")
+            # 331 expect password
+            p = _send_cmd(sock, f"PASS {svc.ftp_pass}")
+            # ignore login failures for availability if banner works, but report it
+            if not (p.startswith(b"230") or p.startswith(b"202")):
+                rtt = ms_since(start)
+                fp = f"banner={sha256_hex(banner)}|feat={sha256_hex(feat)}"
+                return False, f"FTP auth failed: {p.decode('iso-8859-1','replace').strip()}", rtt, fp
+            # If logged in, ask for PWD (no data channel needed)
+            pwd_line = _send_cmd(sock, "PWD")
+
+        # Quit
+        with contextlib.suppress(Exception):
+            _send_cmd(sock, "QUIT")
+
+        rtt = ms_since(start)
+        # Build fingerprint from greeting/feat/pwd
+        fp = f"banner={sha256_hex(banner)}|feat={sha256_hex(feat)}"
+        if pwd_line:
+            # Extract the "current dir" text (e.g., 257 "/pub" is current directory)
+            try:
+                txt = pwd_line.decode("iso-8859-1", "replace")
+                # include the raw line in hash to be safe
+                fp += f"|pwd={sha256_hex(pwd_line)}"
+            except Exception:
+                pass
+
+        # Consider UP if we got a banner and FEAT responded (any code)
+        ok = bool(banner.startswith(b"220"))
+        msg = "FTP up" if ok else "FTP responsive"
+        return ok, f"{msg} ({rtt} ms)", rtt, fp
+
+    except ssl.SSLError as e:
+        return False, f"FTPS TLS error: {e}", None, None
+    except socket.timeout as e:
+        return False, f"FTP timeout: {e}", None, None
+    except Exception as e:
+        return False, f"FTP error: {e}", None, None
+    finally:
+        with contextlib.suppress(Exception):
+            sock.close()
+        if sock is not raw:
+            with contextlib.suppress(Exception):
+                raw.close()
 
 CHECKERS = {
     "HTTPS": check_https,
     "DNS":   check_dns,
     "SMTP":  check_smtp,
     "POP3":  check_pop3,
+    "FTP":   check_ftp,
 }
 
 # ===========================
@@ -454,6 +580,7 @@ def default_port_for(service_type: str) -> int:
         "DNS":   53,
         "SMTP":  25,
         "POP3":  110,
+        "FTP":   21,
     }.get(service_type.upper(), 0)
 
 
@@ -498,6 +625,12 @@ def parse_services(cfg: Dict[str, Any]) -> List[Service]:
             pop_ssl=bool(raw.get("pop_ssl", raw.get("ssl_only", False))),
             pop_user=raw.get("pop_user", raw.get("username")),
             pop_pass=raw.get("pop_pass", raw.get("password")),
+
+            # FTP
+            ftp_mode=raw.get("ftp_mode", "plain"),
+            ftp_user=raw.get("ftp_user"),
+            ftp_pass=raw.get("ftp_pass"),
+            ftp_passive=bool(raw.get("ftp_passive", True)),
 
             timeout=float(raw.get("timeout", cfg.get("timeout_seconds", 6.0))),
         )
