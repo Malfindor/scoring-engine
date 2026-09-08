@@ -1,0 +1,30 @@
+{
+  "interval_seconds": 60,
+  "timeout_seconds": 6,
+  "max_workers": 24,
+  "history_limit": 50,
+  "baseline_mode": "learn",
+  "score_first_success": true,
+  "presets": {
+    "eku-splunk": {
+      "extends": "splunk-webui",
+      "options": {
+        "host_header": "splunk.allsafe.com",
+        "sni": "splunk.allsafe.com"
+      }
+    }
+  },
+  "services": [
+    {"id": "t1-web", "name": "Public web", "team": "Blue Team 1", "preset": "web-https", "host": "172.25.21.140", "weight": 20},
+    {"id": "t1-splunk", "name": "Splunk console", "team": "Blue Team 1", "preset": "eku-splunk", "host": "172.25.21.9", "weight": 20},
+    {"id": "t1-wazuh", "name": "Wazuh dashboard", "team": "Blue Team 1", "preset": "wazuh-webui", "host": "172.25.21.10", "weight": 20},
+    {"id": "t1-dns", "team": "Blue Team 1", "preset": "dns", "host": "172.25.21.155", "options": {"query_name": "ecom.allsafe.com", "expected_answers": ["172.25.21.11"]}, "weight": 15},
+    {"id": "t1-smtp", "team": "Blue Team 1", "preset": "email-smtp", "host": "172.25.21.39", "options": {"username": "employee1", "password": "changeme1"}, "weight": 15},
+    {"id": "t1-imap", "team": "Blue Team 1", "preset": "email-imaps", "host": "172.25.21.39", "options": {"verify_cert": false, "username": "employee1", "password": "changeme1"}, "weight": 10},
+    {"id": "t1-ftp", "team": "Blue Team 1", "preset": "ftp", "host": "172.25.21.162", "options": {"username": "scorer", "password": "scorerpass"}, "weight": 10},
+    {"id": "t1-ssh", "team": "Blue Team 1", "preset": "ssh", "host": "172.25.21.11", "weight": 10},
+    {"id": "t1-ldap", "team": "Blue Team 1", "preset": "ldap", "host": "172.25.21.155", "options": {"bind_dn": "CN=scorer,CN=Users,DC=allsafe,DC=com", "password": "scorerpass"}, "weight": 15},
+    {"id": "t1-rdp", "team": "Blue Team 1", "preset": "rdp", "host": "172.25.21.140", "weight": 10},
+    {"id": "t1-smb", "team": "Blue Team 1", "preset": "smb", "host": "172.25.21.155", "weight": 10}
+  ]
+}

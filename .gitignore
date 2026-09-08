@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+out/
+*.db
+*.db-shm
+*.db-wal
+baseline.json
+scores.csv
+round_details.jsonl

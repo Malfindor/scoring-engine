@@ -1,1 +1,4 @@
-scoring engine, used for EKU's CCDC Practice comps.
+EKU CCDC Scoring Engine
+
+See README.md for setup, configuration presets, supported services, migration,
+and operating instructions.

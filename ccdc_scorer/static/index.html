@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>EKU CCDC · Scoring Operations</title>
+  <link rel="stylesheet" href="/app.css?v=2.1.3">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="#view-status-board" data-view="status-board" aria-label="EKU CCDC scoring home">
+        <span class="brand-mark">EKU</span>
+        <span><strong>CCDC</strong><small>Scoring operations</small></span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a class="nav-link active" href="#view-status-board" data-view="status-board">Status</a>
+        <a class="nav-link" href="#view-services" data-view="services">Services</a>
+        <a class="nav-link" href="#view-uptime-board" data-view="uptime-board">Uptime</a>
+        <a class="nav-link" href="#view-history" data-view="history">History</a>
+      </nav>
+      <div class="engine-state" id="engine-state"><span class="pulse"></span><span>Connecting</span></div>
+    </header>
+
+    <main>
+      <section class="view" id="services" aria-labelledby="services-title">
+        <div class="page-heading compact"><div><p class="eyebrow">Latest round</p><h1 id="services-title">Service health</h1></div></div>
+        <div class="toolbar panel">
+          <label class="search"><span class="sr-only">Search services</span><input id="service-search" type="search" placeholder="Search team, service, host…"></label>
+          <label><span>Team</span><select id="team-filter"><option value="all">All teams</option></select></label>
+          <label><span>Protocol</span><select id="type-filter"><option value="all">All protocols</option></select></label>
+          <label><span>State</span><select id="state-filter"><option value="all">All states</option><option value="up">Online</option><option value="down">Offline</option><option value="mismatch">Mismatch</option><option value="waiting">Waiting</option></select></label>
+        </div>
+        <div class="service-table panel">
+          <div class="service-row service-head"><span>Service</span><span>Endpoint</span><span>State</span><span>Latency</span><span>Score</span><span>Last result</span></div>
+          <div id="service-rows"><div class="empty">Waiting for service data.</div></div>
+        </div>
+      </section>
+
+      <section class="view active" id="status-board" aria-labelledby="status-board-title">
+        <div class="page-heading matrix-heading">
+          <div>
+            <p class="eyebrow">Latest scoring round</p>
+            <h1 id="status-board-title">Team service status</h1>
+            <p class="page-description">A simple current-state view across every team and logical service.</p>
+          </div>
+          <div class="matrix-meta"><span>Round</span><strong id="status-matrix-round">—</strong><small id="status-matrix-updated">Awaiting data</small></div>
+        </div>
+        <div class="matrix-legend" aria-label="Status legend">
+          <span><i class="legend-swatch status-up"></i>Up</span>
+          <span><i class="legend-swatch status-down"></i>Down</span>
+          <span><i class="legend-swatch status-waiting"></i>Waiting</span>
+          <span><i class="legend-swatch status-disabled"></i>Disabled</span>
+        </div>
+        <article class="panel matrix-panel">
+          <div class="matrix-scroll" id="status-matrix" tabindex="0" aria-label="Latest service status matrix">
+            <div class="empty">Waiting for service status data.</div>
+          </div>
+        </article>
+      </section>
+
+      <section class="view" id="uptime-board" aria-labelledby="uptime-board-title">
+        <div class="page-heading matrix-heading">
+          <div>
+            <p class="eyebrow">Historical availability</p>
+            <h1 id="uptime-board-title">Service uptime</h1>
+            <p class="page-description">Percentage of completed checks that reported each service as available.</p>
+          </div>
+          <label class="window-control"><span>Scoring window</span><select id="uptime-window"><option value="0">All rounds</option><option value="10">Last 10 rounds</option><option value="25">Last 25 rounds</option><option value="50">Last 50 rounds</option><option value="100">Last 100 rounds</option></select></label>
+        </div>
+        <div class="matrix-legend" aria-label="Uptime legend">
+          <span><i class="legend-swatch uptime-excellent"></i>90–100%</span>
+          <span><i class="legend-swatch uptime-good"></i>75–89%</span>
+          <span><i class="legend-swatch uptime-warning"></i>50–74%</span>
+          <span><i class="legend-swatch uptime-critical"></i>Below 50%</span>
+          <span class="matrix-period" id="uptime-period">No completed rounds</span>
+        </div>
+        <article class="panel matrix-panel">
+          <div class="matrix-scroll" id="uptime-matrix" tabindex="0" aria-label="Historical service uptime matrix">
+            <div class="empty">Waiting for uptime data.</div>
+          </div>
+        </article>
+      </section>
+
+      <section class="view" id="history" aria-labelledby="history-title">
+        <div class="page-heading compact"><div><p class="eyebrow">Scoring record</p><h1 id="history-title">Round history</h1></div></div>
+        <article class="panel history-panel">
+          <div class="panel-heading"><div><p class="eyebrow">Recent performance</p><h2>Points by round</h2></div><span class="tag">Last 20</span></div>
+          <div class="history-chart" id="history-chart"><div class="empty">Round history will appear here.</div></div>
+        </article>
+        <article class="panel rounds-panel">
+          <div class="round-table-head"><span>Round</span><span>Completed</span><span>Team results</span></div>
+          <div id="round-rows"><div class="empty">No completed rounds.</div></div>
+        </article>
+      </section>
+    </main>
+    <footer><span>EKU Collegiate Cyber Defense Competition</span><span id="refresh-state">Updates every 5 seconds</span></footer>
+  </div>
+  <script src="/app.js?v=2.1.3" defer></script>
+</body>
+</html>

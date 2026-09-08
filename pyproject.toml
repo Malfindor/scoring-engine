@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eku-ccdc-scorer"
+version = "2.0.0"
+description = "Service availability and integrity scoring for EKU's CCDC team"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "EKU CCDC"}]
+dependencies = []
+
+[project.optional-dependencies]
+ssh-auth = ["paramiko>=3.4,<5"]
+dev = ["pytest>=8,<10", "ruff>=0.12,<1"]
+
+[project.scripts]
+eku-ccdc-scorer = "ccdc_scorer.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ccdc_scorer*"]
+
+[tool.setuptools.package-data]
+ccdc_scorer = ["static/*.html", "static/*.css", "static/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
